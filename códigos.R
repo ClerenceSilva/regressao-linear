@@ -1,9 +1,10 @@
 ### Seminário CE-310 — Bilheteria de Filmes Nacionais e Estrangeiros (ANCINE)
-
-## Ajustando as bases
-
+library(effects)
 library(tidyverse)
 library(lubridate)
+library(car)
+library(corrplot)
+## Ajustando as bases
 
 # ── 1. BASE 28 ─────────────────────────────────────────────────────────────────
 base28 <- read_delim(
@@ -36,7 +37,6 @@ arquivos17 <- list.files(
   pattern    = "\\.csv$",
   full.names = TRUE
 )
-arquivos17
 
 base17 <- map_dfr(
   arquivos17,
@@ -218,26 +218,6 @@ base_modelo <- base_modelo |>
     
     .groups = "drop"
   )
-
-glimpse(base_modelo)
-
-
-
-
-### Análise Descritiva
-
-require(car)
-require(corrplot)
-
-### Variáveis utilizadas na análise:
-### log_publico        : logaritmo do público total (variável resposta)
-### n_salas            : número de salas em que o filme foi exibido
-### n_ufs              : número de estados em que o filme foi exibido
-### n_semanas          : tempo em cartaz (semanas)
-### distribuidora_grande: grande distribuidora (Disney, Warner...) — 1/0
-### nacional           : filme brasileiro — 1/0
-### ficcao             : ficção (1) ou documentário (0)
-
 ### Criando a variável resposta transformada e a dummy para tipo de obra.
 ### TIPO_OBRA possui 8 categorias; colapsamos em ficção vs. demais pois
 ### ficção concentra a grande maioria dos títulos comerciais da base.
@@ -246,6 +226,23 @@ base_modelo <- base_modelo |>
     log_publico = log(PUBLICO_TOTAL),
     ficcao      = if_else(TIPO_OBRA == "FICÇÃO", 1L, 0L)
   )
+
+glimpse(base_modelo)
+
+
+
+
+### Análise Descritiva
+
+### Variáveis utilizadas na análise:
+### log_publico        : logaritmo do público total (variável resposta)
+### n_salas            : número de salas em que o filme foi exibido
+### n_ufs              : número de estados em que o filme foi exibido
+### n_semanas          : tempo em cartaz (semanas)
+### distribuidora_grande: grande distribuidora (Disney, Warner...) — 1/0
+### nacional           : filme brasileiro — 1/0
+### ficcao             : ficção (1) ou outros (0)
+
 
 ###############################################################################
 ### 1. Estatísticas descritivas
@@ -348,3 +345,206 @@ par(mfrow = c(1, 1))
 ### Filmes de ficção e distribuídos por grandes distribuidoras tendem a
 ### apresentar maior público. Filmes nacionais têm mediana de público
 ### inferior à de estrangeiros nesta base.
+
+
+###############################################################################
+### Ajuste do Modelo de Regressão Linear Múltipla
+
+
+### Variável resposta:
+###   log_publico         : logaritmo natural do público total
+###
+### Variáveis explicativas (8):
+###   n_salas             : número de salas em que o filme foi exibido
+###   n_ufs               : número de estados (UFs) em que o filme foi exibido
+###   n_semanas           : semanas em cartaz
+###   distribuidora_grande: grande distribuidora (Disney, Warner, etc.) — dummy (0/1)
+###   nacional            : filme brasileiro — dummy (0/1)
+###   ficcao              : ficção vs. demais tipos de obra — dummy (0/1)
+###   mes_lancamento      : mês de lançamento (1 a 12) — componente sazonal
+###   ano_lancamento      : ano de lançamento — tendência temporal
+
+ajuste <- lm(
+  log_publico ~ n_salas + n_ufs + n_semanas +
+    distribuidora_grande + nacional + ficcao +
+    mes_lancamento + ano_lancamento,
+  data = base_modelo
+)
+
+print(ajuste)
+### Estimativas de mínimos quadrados para os parâmetros do modelo.
+
+summary(ajuste)
+### Os resultados do ajuste indicam a significância individual de cada variável
+### (coluna Pr(>|t|)), a qualidade do ajuste (R² e R² ajustado) e a
+### significância global do modelo (estatística F, última linha).
+### Como a resposta está na escala logarítmica, os coeficientes expressam
+### variação em log(público) — a interpretação na escala original é feita
+### via exp(coef).
+
+confint(ajuste)
+### Intervalos de confiança (95%) para os parâmetros do modelo.
+
+### Gráfico de valores observados versus ajustados
+par(cex = 1.2, las = 1)
+plot(fitted(ajuste), base_modelo$log_publico,
+     xlab = 'log(Público) ajustado',
+     ylab = 'log(Público) observado',
+     pch  = 20)
+abline(0, 1, col = 'red', lwd = 2)
+### Pontos próximos à reta y = x indicam bom ajuste. Desvios sistemáticos
+### sugerem má especificação ou necessidade de transformações adicionais —
+### a ser investigado na etapa de diagnóstico.
+
+###############################################################################
+### Diagnóstico do Modelo de Regressão Linear
+
+###############################################################################
+### 1. Resíduos versus valores ajustados
+
+fit <- fitted(ajuste)
+res <- rstudent(ajuste)
+
+par(cex = 1.4, las = 1)
+plot(fit, res,
+     xlab = 'Valores ajustados',
+     ylab = 'Resíduos studentizados',
+     pch  = 20)
+abline(h = 0, lty = 2, col = 'gray50')
+### Avalia homocedasticidade. A dispersão dos resíduos deve ser
+### aproximadamente constante ao longo dos valores ajustados.
+
+###############################################################################
+### 2. Teste formal de variância constante
+
+ncvTest(ajuste)
+### H0: variância dos erros é constante (homocedasticidade).
+### p-valor < 0,05 indica evidência de heterocedasticidade.
+
+###############################################################################
+### 3. Normalidade dos resíduos
+qqPlot(ajuste, pch = 20, cex = 1.2,
+       xlab = 'Quantis t-Student',
+       ylab = 'Resíduos studentizados')
+### Os pontos devem seguir a reta de referência e permanecer dentro
+### do envelope de confiança para suportar a hipótese de normalidade.
+
+###############################################################################
+### 4. Resíduos versus variáveis explicativas contínuas
+
+par(cex = 1.2, las = 1)
+
+plot(base_modelo$n_salas, res,
+     xlab = 'Número de salas', ylab = 'Resíduos studentizados', pch = 20)
+abline(h = 0, lty = 2, col = 'gray50')
+lines(lowess(res ~ base_modelo$n_salas), lwd = 2, col = 'red')
+
+plot(base_modelo$n_ufs, res,
+     xlab = 'Número de UFs', ylab = 'Resíduos studentizados', pch = 20)
+abline(h = 0, lty = 2, col = 'gray50')
+lines(lowess(res ~ base_modelo$n_ufs), lwd = 2, col = 'red')
+
+plot(base_modelo$n_semanas, res,
+     xlab = 'Semanas em cartaz', ylab = 'Resíduos studentizados', pch = 20)
+abline(h = 0, lty = 2, col = 'gray50')
+lines(lowess(res ~ base_modelo$n_semanas), lwd = 2, col = 'red')
+
+plot(base_modelo$ano_lancamento, res,
+     xlab = 'Ano de lançamento', ylab = 'Resíduos studentizados', pch = 20)
+abline(h = 0, lty = 2, col = 'gray50')
+### Tendência sistemática nesses gráficos sugere relação não linear ou
+### heterocedasticidade associada à variável em questão.
+
+###############################################################################
+### 5. Diagnóstico de outliers, alavanca e influência
+
+influenceIndexPlot(ajuste,
+                   vars = c('Cook', 'Studentized', 'hat'),
+                   id   = list(n = 3),
+                   pch  = 20, cex = 1.2, las = 1)
+### Cook: observações com distância de Cook elevada são influentes
+###       (afetam expressivamente as estimativas dos parâmetros).
+### Studentized: |resíduo| > 3 sinaliza outlier.
+### Hat: valores de alavanca (hat) elevados indicam pontos extremos
+###      no espaço das variáveis explicativas.
+
+###############################################################################
+### 6. Multicolinearidade — Fator de Inflação da Variância (VIF)
+
+vif(ajuste)
+### VIF > 10 indica multicolinearidade problemática.
+### VIF entre 5 e 10 merece atenção.
+### n_salas e n_ufs apresentaram correlação elevada na análise descritiva
+### e são os candidatos mais prováveis a VIF alto.
+
+sqrt(vif(ajuste))
+### Raiz do VIF: quantas vezes o erro padrão do estimador é maior do que
+### seria se as variáveis fossem ortogonais.
+
+
+###############################################################################
+### Medidas Corretivas
+
+### O diagnóstico identificou:
+### — Heterocedasticidade: ncvTest com qui-quadrado = 390,9 e p < 2,22e-16.
+###   A hipótese de variância constante é fortemente rejeitada.
+### — Multicolinearidade: VIF de todas as variáveis próximo de 2.
+###   Sem evidência de multicolinearidade problemática.
+### — Outliers: observações 123 e 2937 fora do envelope do QQ-plot.
+###
+### Medida adotada: mínimos quadrados ponderados (MQP) com pesos definidos
+### via regressão auxiliar sobre o log dos resíduos ao quadrado.
+
+###############################################################################
+### 1. Regressão auxiliar sobre log(resíduos²)
+
+ajuste_aux <- lm(
+  log(residuals(ajuste)^2) ~ n_salas + n_ufs + n_semanas +
+    distribuidora_grande + nacional + ficcao +
+    mes_lancamento + ano_lancamento,
+  data = base_modelo
+)
+
+h <- exp(predict(ajuste_aux))
+### h contém a variância estimada para cada observação.
+### Os pesos são definidos como 1/h, atribuindo menor peso às observações
+### com maior variância estimada.
+
+###############################################################################
+### 2. Ajuste via mínimos quadrados ponderados
+
+ajuste_mqp <- lm(
+  log_publico ~ n_salas + n_ufs + n_semanas +
+    distribuidora_grande + nacional + ficcao +
+    mes_lancamento + ano_lancamento,
+  weights = 1/h,
+  data    = base_modelo
+)
+
+summary(ajuste_mqp)
+
+###############################################################################
+### 3. Comparação entre MQO e MQP
+
+compareCoefs(ajuste, ajuste_mqp, zvals = TRUE, pvals = TRUE)
+### Permite verificar se houve variação relevante nas estimativas e erros
+### padrão após a ponderação. Espera-se redução nos erros padrão das
+### variáveis afetadas pela heterocedasticidade.
+
+###############################################################################
+### 4. Diagnóstico do modelo corrigido
+
+ncvTest(ajuste_mqp)
+### Verificamos se a hipótese de variância constante deixa de ser rejeitada
+### após a ponderação.
+
+par(mfrow = c(1, 2))
+plot(ajuste,     pch = 20, cex = 1.2, which = 3, lwd = 2,
+     main = 'MQO')
+plot(ajuste_mqp, pch = 20, cex = 1.2, which = 3, lwd = 2,
+     main = 'MQP')
+par(mfrow = c(1, 1))
+### Comparação visual do padrão de variância antes e após a ponderação.
+### O gráfico scale-location do MQP deve apresentar dispersão mais uniforme.
+
+
