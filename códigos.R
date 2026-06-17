@@ -4,6 +4,8 @@ library(tidyverse)
 library(lubridate)
 library(car)
 library(corrplot)
+library(lmtest)    
+library(sandwich)  
 ## Ajustando as bases
 
 # ── 1. BASE 28 ─────────────────────────────────────────────────────────────────
@@ -385,6 +387,21 @@ summary(ajuste)
 confint(ajuste)
 ### Intervalos de confiança (95%) para os parâmetros do modelo.
 
+###############################################################################
+### Teste de hipóteses tipo III — Anova() do pacote car
+
+Anova(ajuste)
+### Diferente de anova() base (tipo I — sequencial), Anova() testa cada efeito
+### ajustado por todos os demais. Mais adequado para modelos com variáveis
+### correlacionadas, como n_salas e n_ufs.
+
+### Gráfico de efeitos marginais
+
+plot(allEffects(ajuste))
+### Efeito marginal de cada variável na escala de log_publico,
+### com as demais fixadas em seus valores médios/modais.
+### Útil para a discussão substantiva dos resultados.
+
 ### Gráfico de valores observados versus ajustados
 par(cex = 1.2, las = 1)
 plot(fitted(ajuste), base_modelo$log_publico,
@@ -408,11 +425,22 @@ res <- rstudent(ajuste)
 par(cex = 1.4, las = 1)
 plot(fit, res,
      xlab = 'Valores ajustados',
-     ylab = 'Resíduos studentizados',
+     ylab = 'Residuos studentizados',
      pch  = 20)
 abline(h = 0, lty = 2, col = 'gray50')
 ### Avalia homocedasticidade. A dispersão dos resíduos deve ser
 ### aproximadamente constante ao longo dos valores ajustados.
+
+###############################################################################
+### 1b. Painéis clássicos de diagnóstico (which = 1:4)
+
+par(mfrow = c(2, 2))
+plot(ajuste, which = 1:4, pch = 20, cex = 1.2)
+par(mfrow = c(1, 1))
+### Painel 1 (Residuals vs Fitted)  : linearidade e homocedasticidade.
+### Painel 2 (Normal Q-Q)           : normalidade dos resíduos.
+### Painel 3 (Scale-Location)       : homocedasticidade via √|resíduo padronizado|.
+### Painel 4 (Residuals vs Leverage): outliers influentes (distância de Cook).
 
 ###############################################################################
 ### 2. Teste formal de variância constante
@@ -421,13 +449,6 @@ ncvTest(ajuste)
 ### H0: variância dos erros é constante (homocedasticidade).
 ### p-valor < 0,05 indica evidência de heterocedasticidade.
 
-###############################################################################
-### 3. Normalidade dos resíduos
-qqPlot(ajuste, pch = 20, cex = 1.2,
-       xlab = 'Quantis t-Student',
-       ylab = 'Resíduos studentizados')
-### Os pontos devem seguir a reta de referência e permanecer dentro
-### do envelope de confiança para suportar a hipótese de normalidade.
 
 ###############################################################################
 ### 4. Resíduos versus variáveis explicativas contínuas
@@ -435,7 +456,7 @@ qqPlot(ajuste, pch = 20, cex = 1.2,
 par(cex = 1.2, las = 1)
 
 plot(base_modelo$n_salas, res,
-     xlab = 'Número de salas', ylab = 'Resíduos studentizados', pch = 20)
+     xlab = "Número de salas", ylab = "Resíduos studentizados", pch = 20)
 abline(h = 0, lty = 2, col = 'gray50')
 lines(lowess(res ~ base_modelo$n_salas), lwd = 2, col = 'red')
 
@@ -454,6 +475,41 @@ plot(base_modelo$ano_lancamento, res,
 abline(h = 0, lty = 2, col = 'gray50')
 ### Tendência sistemática nesses gráficos sugere relação não linear ou
 ### heterocedasticidade associada à variável em questão.
+
+###############################################################################
+### 4b. Resíduos versus variáveis explicativas binárias (dummies)
+
+par(cex = 1.2, las = 1)
+
+plot(base_modelo$nacional, res,
+     xlab = 'Nacional', ylab = 'Resíduos studentizados', pch = 20)
+abline(h = 0, lty = 2, col = 'gray50')
+
+plot(base_modelo$distribuidora_grande, res,
+     xlab = 'Distribuidora grande', ylab = 'Resíduos studentizados', pch = 20)
+abline(h = 0, lty = 2, col = 'gray50')
+
+plot(base_modelo$ficcao, res,
+     xlab = 'Ficção', ylab = 'Resíduos studentizados', pch = 20)
+abline(h = 0, lty = 2, col = 'gray50')
+### Diferença sistemática de variância entre os dois níveis de cada dummy
+### sugere heterocedasticidade associada àquela variável categórica.
+
+###############################################################################
+### 4c. Resíduos parciais (component + residual plots)
+
+# Opção base R: termplot — uma variável por vez (terms = posição na fórmula)
+par(mfrow = c(1, 3), cex = 1.2, las = 1)
+termplot(ajuste, partial.resid = TRUE, terms = 1, pch = 20, col.res = 'black') # n_salas
+termplot(ajuste, partial.resid = TRUE, terms = 2, pch = 20, col.res = 'black') # n_ufs
+termplot(ajuste, partial.resid = TRUE, terms = 3, pch = 20, col.res = 'black') # n_semanas
+par(mfrow = c(1, 1))
+
+# Opção car: crPlots — todos os contínuos, mais completo
+crPlots(ajuste, cex = 1.5, pch = 20)
+### A linha suavizada (lowess) vs. a reta linear indica não-linearidade
+### não captada pelo modelo. Se acompanharem a reta, a especificação
+### linear é adequada para aquela variável.
 
 ###############################################################################
 ### 5. Diagnóstico de outliers, alavanca e influência
@@ -490,10 +546,8 @@ sqrt(vif(ajuste))
 ###   A hipótese de variância constante é fortemente rejeitada.
 ### — Multicolinearidade: VIF de todas as variáveis próximo de 2.
 ###   Sem evidência de multicolinearidade problemática.
-### — Outliers: observações 123 e 2937 fora do envelope do QQ-plot.
-###
-### Medida adotada: mínimos quadrados ponderados (MQP) com pesos definidos
-### via regressão auxiliar sobre o log dos resíduos ao quadrado.
+### — Caudas pesadas: QQ-plot com desvio nos extremos (obs 123, 90, 2506).
+###   O corpo da distribuição está adequado; o desvio é nas caudas.
 
 ###############################################################################
 ### 1. Regressão auxiliar sobre log(resíduos²)
@@ -527,24 +581,58 @@ summary(ajuste_mqp)
 ### 3. Comparação entre MQO e MQP
 
 compareCoefs(ajuste, ajuste_mqp, zvals = TRUE, pvals = TRUE)
-### Permite verificar se houve variação relevante nas estimativas e erros
-### padrão após a ponderação. Espera-se redução nos erros padrão das
-### variáveis afetadas pela heterocedasticidade.
+### As estimativas pontuais permanecem estáveis entre os dois ajustes.
+### O MQP reduziu os erros padrão das variáveis mais afetadas pela
+### heterocedasticidade (n_salas, n_ufs), confirmando a correção parcial.
 
 ###############################################################################
 ### 4. Diagnóstico do modelo corrigido
 
+### 4a. Teste formal de variância constante
 ncvTest(ajuste_mqp)
-### Verificamos se a hipótese de variância constante deixa de ser rejeitada
-### após a ponderação.
+### Qui-quadrado = 11,28; p = 0,00078.
+### O MQP reduziu expressivamente a heterocedasticidade (qui-quadrado caiu
+### de 390,9 para 11,3), mas H0 ainda é rejeitada — a correção foi parcial.
 
+### 4b. Comparação visual Scale-Location: MQO vs MQP
 par(mfrow = c(1, 2))
-plot(ajuste,     pch = 20, cex = 1.2, which = 3, lwd = 2,
-     main = 'MQO')
-plot(ajuste_mqp, pch = 20, cex = 1.2, which = 3, lwd = 2,
-     main = 'MQP')
+plot(ajuste,     pch = 20, cex = 1.2, which = 3, lwd = 2, main = 'MQO')
+plot(ajuste_mqp, pch = 20, cex = 1.2, which = 3, lwd = 2, main = 'MQP')
 par(mfrow = c(1, 1))
-### Comparação visual do padrão de variância antes e após a ponderação.
-### O gráfico scale-location do MQP deve apresentar dispersão mais uniforme.
+### O padrão de funil invertido é atenuado no MQP mas não eliminado,
+### consistente com o resultado do ncvTest.
 
+### 4c. Painéis completos de diagnóstico do MQP
+par(mfrow = c(2, 2))
+plot(ajuste_mqp, which = 1:4, pch = 20, cex = 1.2)
+par(mfrow = c(1, 1))
+### Painel 1: funil residual atenuado, heterocedasticidade residual presente.
+### Painel 2: caudas pesadas nos extremos; corpo da distribuição adequado.
+### Painel 3: linha com leve inclinação negativa, confirma variância não constante.
+### Painel 4: distância de Cook máxima ≈ 0,014 (obs 1775) — muito abaixo de 0,5.
+###           Nenhuma observação exerce influência indevida sobre os coeficientes.
 
+### 4d. Investigação das observações com maior distância de Cook
+idx_cook <- c(1775, 552, 1846)
+base_modelo[idx_cook, c("TITULO_ORIGINAL", "PUBLICO_TOTAL",
+                        "n_salas", "n_ufs", "n_semanas")]
+### Todos abaixo do limiar de Cook = 0,5: observações mantidas na análise.
+
+###############################################################################
+### 5. Inferência final com erros padrão robustos (HC3)
+
+### Como o MQP não eliminou completamente a heterocedasticidade,
+### a inferência final é realizada com erros padrão robustos sobre o MQO.
+### O estimador HC3 (MacKinnon e White, 1985) é válido independentemente
+### da estrutura da variância e é preferível com amostras grandes.
+
+rob <- coeftest(ajuste, vcov = vcovHC(ajuste, type = "HC3"))
+print(rob)
+
+### Intervalos de confiança robustos (95%)
+coefci(ajuste, vcov = vcovHC(ajuste, type = "HC3"))
+
+### Todas as variáveis permanecem significativas a 5% com inferência robusta.
+### n_semanas é a mais sensível à correção: p passou de 0,003 para 0,017,
+### indicando evidência mais frágil para o efeito do tempo em cartaz.
+### As estimativas pontuais são idênticas às do MQO original.
