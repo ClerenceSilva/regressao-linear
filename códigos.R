@@ -595,7 +595,7 @@ ncvTest(ajuste_mqp)
 ### de 390,9 para 11,3), mas H0 ainda é rejeitada — a correção foi parcial.
 
 ### 4b. Comparação visual Scale-Location: MQO vs MQP
-par(mfrow = c(1, 2))
+par(mfrow = c(2, 1))
 plot(ajuste,     pch = 20, cex = 1.2, which = 3, lwd = 2, main = 'MQO')
 plot(ajuste_mqp, pch = 20, cex = 1.2, which = 3, lwd = 2, main = 'MQP')
 par(mfrow = c(1, 1))
@@ -628,7 +628,6 @@ base_modelo[idx_cook, c("TITULO_ORIGINAL", "PUBLICO_TOTAL",
 
 rob <- coeftest(ajuste, vcov = vcovHC(ajuste, type = "HC3"))
 print(rob)
-
 ### Intervalos de confiança robustos (95%)
 coefci(ajuste, vcov = vcovHC(ajuste, type = "HC3"))
 
@@ -636,3 +635,6 @@ coefci(ajuste, vcov = vcovHC(ajuste, type = "HC3"))
 ### n_semanas é a mais sensível à correção: p passou de 0,003 para 0,017,
 ### indicando evidência mais frágil para o efeito do tempo em cartaz.
 ### As estimativas pontuais são idênticas às do MQO original.
+
+
+
